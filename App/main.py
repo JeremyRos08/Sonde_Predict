@@ -14,14 +14,14 @@ def enable_dark_theme(app: QApplication):
 
     # Fond principal
     palette.setColor(QPalette.Window, QColor(40, 40, 40))
-    palette.setColor(QPalette.WindowText, Qt.black)
+    palette.setColor(QPalette.WindowText, Qt.white)
 
     # Widgets (groupbox, boutons, etc.)
     palette.setColor(QPalette.Base, QColor(30, 30, 30))
     palette.setColor(QPalette.AlternateBase, QColor(45, 45, 45))
     palette.setColor(QPalette.Text, Qt.white)
     palette.setColor(QPalette.Button, QColor(55, 55, 55))
-    palette.setColor(QPalette.ButtonText, Qt.black)
+    palette.setColor(QPalette.ButtonText, Qt.white)
 
     # Surbrillance (sélections dans tables, combo…)
     palette.setColor(QPalette.Highlight, QColor(90, 140, 200))
@@ -34,6 +34,7 @@ def enable_dark_theme(app: QApplication):
     # Lignes / disabled
     palette.setColor(QPalette.Disabled, QPalette.Text, QColor(150, 150, 150))
     palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(130, 130, 130))
+    palette.setColor(QPalette.Disabled, QPalette.WindowText, QColor(130, 130, 130))
 
     app.setPalette(palette)
 
