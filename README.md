@@ -40,7 +40,7 @@ Sous Windows / Linux, avec `conda` (miniconda/anaconda) :
 
 ```bash
 git clone https://github.com/JeremyRos08/Sonde_Predict.git
-cd <TON_REPO>
+cd Sonde_Predict
 
 conda env create -f environment.yml
 conda activate sonde_predict
