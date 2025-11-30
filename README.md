@@ -1,3 +1,5 @@
+> Version actuelle : **v1.0.0**
+
 # Sonde_Predict
 Sonde_Predict est une app creer en PyQt5 pour prédire le point d'impact d'une sonde meteo en parachute ou chute libre.
 
