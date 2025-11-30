@@ -23,7 +23,7 @@ from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg as FigureCanvas,
     NavigationToolbar2QT as NavigationToolbar,
 )
-
+from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt
 
 from PyQt5.QtWidgets import (
@@ -49,6 +49,7 @@ from PyQt5.QtWidgets import (
     QAction,
     QSizePolicy,  
     QCheckBox,
+
 )
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -57,6 +58,13 @@ from matplotlib.figure import Figure
 from profiles import DescentProfile, WindProfile, DescentPoint, WindPoint
 from simulation import simulate_descent, State
 from map_widget import MapWidget
+
+import matplotlib as mpl
+
+
+def app_icon(name: str) -> QIcon:
+    path = os.path.join("resources", "icons", f"{name}.png")
+    return QIcon(path)
 
 # Chutte 3D
 class ThreeDCanvas(FigureCanvas):
@@ -67,7 +75,8 @@ class ThreeDCanvas(FigureCanvas):
         fig = Figure(figsize=(7, 6))
         super().__init__(fig)
         self.setParent(parent)
-
+        
+        
         self.ax3d = fig.add_subplot(111, projection="3d")
                 # Utiliser presque tout l'espace du canvas
         fig.subplots_adjust(
@@ -76,7 +85,8 @@ class ThreeDCanvas(FigureCanvas):
             top=0.97,
             bottom=0.05,
         )
-
+        fig.patch.set_facecolor("#717171")
+        self.ax3d.set_facecolor("#717171")
 
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.updateGeometry()
@@ -248,6 +258,10 @@ class TrajectoryCanvas(FigureCanvas):
         self.ax_polar = fig.add_subplot(2, 2, 4, projection="polar")  # Vue polaire / boussole
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.updateGeometry()
+
+        fig.patch.set_facecolor("#717171")
+        for ax in (self.ax_alt, self.ax_dist, self.ax_map, self.ax_polar):
+            ax.set_facecolor("#717171")         # fond à l'intérieur du graph
         
     def plot_trajectory(self, states: List[State]):
         # Reset
@@ -346,6 +360,9 @@ class MonteCarloCanvas(FigureCanvas):
         # Deux graphes l'un sous l'autre : zone d'impact en haut, histo en bas
         self.ax_xy = fig.add_subplot(2, 1, 1)
         self.ax_dist = fig.add_subplot(2, 1, 2)
+        fig.patch.set_facecolor("#71717171")
+        for ax in (self.ax_xy, self.ax_dist):
+            ax.set_facecolor("#71717171")
 
         fig.subplots_adjust(
             left=0.07,
@@ -674,7 +691,7 @@ class MonteCarloDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Prévision de descente de ballon sonde")
+        self.setWindowTitle("Prévision de descente de ballon sonde V1.0")
 
         self.current_states: List[State] = []
 
@@ -870,11 +887,11 @@ class MainWindow(QMainWindow):
         tab3d_layout.addWidget(self.canvas3d)
 
         controls_layout = QHBoxLayout()
-        self.btn_anim_play = QPushButton("▶ Lecture")
-        self.btn_anim_stop = QPushButton("■ Stop")
+        self.btn_anim_play = QPushButton("")
+        self.btn_anim_stop = QPushButton("")
         self.btn_anim_stop.setEnabled(False)
 
-        self.btn_anim_reset = QPushButton("↺ Reset vue")
+        self.btn_anim_reset = QPushButton("")
         self.btn_anim_reset.setEnabled(True)
 
         self.slider_anim = QSlider(Qt.Orientation.Horizontal)
@@ -946,6 +963,31 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self.resize(1300, 750)
+        
+        # Icon Boutton
+        self.setWindowIcon(app_icon("app"))
+
+        
+        btn_simulate.setIcon(app_icon("simulate"))
+
+        
+        btn_mc.setIcon(app_icon("monte_carlo"))
+
+        
+        btn_descent.setIcon(app_icon("csv_desc"))
+
+        
+        btn_wind.setIcon(app_icon("csv_wind"))
+
+        
+        btn_gfs.setIcon(app_icon("gfs_file"))
+        
+        
+        btn_gfs_dl.setIcon(app_icon("gfs_download"))
+
+        self.btn_anim_play.setIcon(app_icon("play"))
+        self.btn_anim_stop.setIcon(app_icon("pause"))
+        self.btn_anim_reset.setIcon(app_icon("reset_view"))
         
     def _on_reset_3d_view(self):
         # recadre la vue 3D sur toute la trajectoire
