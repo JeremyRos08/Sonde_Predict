@@ -1,0 +1,11 @@
+Pour les libs Python (pip) :
+
+```text
+PyQt5
+PyQtWebEngine
+matplotlib
+folium
+requests
+xarray
+cfgrib
+eccodes
