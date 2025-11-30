@@ -9,8 +9,8 @@
 ## 2. Installation avec conda (recommandé)
 
 ```bash
-git clone https://github.com/<TON_USER>/<TON_REPO>.git
-cd <TON_REPO>
+git clone https://github.com/JeremyRos08/Sonde_Predict.git
+cd Sonde_Predict
 
 conda env create -f environment.yml
 conda activate sonde_predict
