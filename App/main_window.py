@@ -59,6 +59,8 @@ from profiles import DescentProfile, WindProfile, DescentPoint, WindPoint
 from simulation import simulate_descent, State
 from map_widget import MapWidget
 
+from version import __version__
+
 import matplotlib as mpl
 
 
@@ -691,7 +693,7 @@ class MonteCarloDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Prévision de descente de ballon sonde V1.0")
+        self.setWindowTitle(f"Prévision de descente de ballon sonde - v{__version__}")
 
         self.current_states: List[State] = []
 
