@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+
+# Environnements
+.venv/
+.conda/
+env/
+venv/
+
+# Build / dist
+build/
+dist/
+*.spec
+
+# IDE / éditeurs
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Qt / cache divers
+*.pyc
+*.qmlc
+*.jsc
