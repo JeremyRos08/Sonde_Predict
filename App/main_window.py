@@ -1117,6 +1117,34 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
+        # Menu Aide
+        help_menu = menubar.addMenu("Aide")
+        about_action = QAction("À propos…", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
+
+
+    def show_about_dialog(self):
+        """
+        Fenêtre 'À propos' de l'application.
+        """
+        text = f"""
+        <h3>Sonde Predict</h3>
+        <p>Version : <b>{__version__}</b></p>
+        <p>Simulation de descente de ballon / objet :</p>
+        <ul>
+          <li>Profils de descente et de vent (CSV / GFS)</li>
+          <li>Trajectoire 2D + 3D animée</li>
+          <li>Monte Carlo & ellipse d'impact</li>
+        </ul>
+        <p>Code source :<br>
+        <a href="https://github.com/JeremyRos08/Sonde_Predict">
+          github.com/JeremyRos08/Sonde_Predict
+        </a></p>
+        """
+
+        QMessageBox.about(self, "À propos de Sonde Predict", text)
+
     # ---------- Profils par défaut ----------
 
     def _init_default_profiles(self):
