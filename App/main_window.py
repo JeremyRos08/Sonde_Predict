@@ -14,7 +14,7 @@ import datetime
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QSlider
 
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  # nécessaire pour le 3D
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 # nécessaire pour le 3D
 from PyQt5.QtWidgets import QSizePolicy
 
 from typing import List, Optional
