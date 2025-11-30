@@ -1,0 +1,16 @@
+name: sonde_predict
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pyqt
+  - pyqtwebengine
+  - matplotlib
+  - folium
+  - requests
+  - xarray
+  - cfgrib
+  - eccodes
+  - pip
+  - pip:
+      - folium
