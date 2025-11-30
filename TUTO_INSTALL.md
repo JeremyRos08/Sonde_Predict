@@ -16,9 +16,9 @@ conda env create -f environment.yml
 conda activate sonde_predict
 
 python main.py
+____________________________________________________________________________
 
-////////////////////////////////////////////////////////////////////////
-## ▶️ Utilisation rapide
+▶️ Utilisation rapide
 
 Lancer python main.py
 
