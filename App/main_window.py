@@ -5,11 +5,13 @@ import os
 import csv
 import math
 import simulation
-
+from simulation import simulate_descent, simulate_flight, State
+from profiles import AscentProfile, AscentPoint
 import gfs_utils
 import requests
 import gfs_download
 import datetime
+from map_widget import MAP_STYLES
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QSlider
@@ -149,7 +151,7 @@ class ThreeDCanvas(FigureCanvas):
         self._alts = alts
 
         # Trajectoire complète
-        (self._line,) = self.ax3d.plot(xs_km, ys_km, alts, marker=".", linewidth=1.0)
+        
 
         # Limites Z
         zmax = max(alts)
@@ -264,9 +266,69 @@ class TrajectoryCanvas(FigureCanvas):
         fig.patch.set_facecolor("#717171")
         for ax in (self.ax_alt, self.ax_dist, self.ax_map, self.ax_polar):
             ax.set_facecolor("#717171")         # fond à l'intérieur du graph
-        
+
+    def extract(states):
+        t_min = [s.t_s / 60.0 for s in states]
+        alt = [s.alt_m for s in states]
+        lats = [s.lat_deg for s in states]
+        lons = [s.lon_deg for s in states]
+        return t_min, alt, lats, lons  
+    
+class TrajectoryCanvas(FigureCanvas):
+    def __init__(self, parent: Optional[QWidget] = None):
+        fig = Figure(figsize=(7, 7))
+        super().__init__(fig)
+        self.setParent(parent)
+
+        # 4 sous-graphiques : 2 x 2
+        self.ax_alt = fig.add_subplot(2, 2, 1)                        # Altitude vs temps
+        self.ax_dist = fig.add_subplot(2, 2, 2)                       # Altitude vs distance
+        self.ax_map = fig.add_subplot(2, 2, 3)                        # Trajectoire sol
+        self.ax_polar = fig.add_subplot(2, 2, 4, projection="polar")  # Vue polaire
+
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.updateGeometry()
+
+        fig.patch.set_facecolor("#717171")
+        for ax in (self.ax_alt, self.ax_dist, self.ax_map, self.ax_polar):
+            ax.set_facecolor("#717171")
+
+    # ---------- utilitaires ----------
+
+    def _split_phases(self, states: List[State]):
+        ascent = [s for s in states if s.phase == "ASCENT"]
+        descent = [s for s in states if s.phase == "DESCENT"]
+        return ascent, descent
+
+    def _local_xy_km(self, states: List[State]):
+        lat0 = math.radians(states[0].lat_deg)
+        lat_ref = states[0].lat_deg
+        lon_ref = states[0].lon_deg
+
+        xs = []
+        ys = []
+
+        for s in states:
+            dlat = math.radians(s.lat_deg - lat_ref)
+            dlon = math.radians(s.lon_deg - lon_ref)
+
+            x = simulation.EARTH_RADIUS_M * dlon * math.cos(lat0)
+            y = simulation.EARTH_RADIUS_M * dlat
+
+            xs.append(x / 1000.0)
+            ys.append(y / 1000.0)
+
+        return xs, ys
+
+    def _polar_coords(self, states: List[State]):
+        xs, ys = self._local_xy_km(states)
+        r = [math.hypot(x, y) for x, y in zip(xs, ys)]
+        theta = [math.atan2(x, y) for x, y in zip(xs, ys)]
+        return theta, r
+
+    # ---------- tracé principal ----------
+
     def plot_trajectory(self, states: List[State]):
-        # Reset
         self.ax_alt.clear()
         self.ax_dist.clear()
         self.ax_map.clear()
@@ -276,82 +338,126 @@ class TrajectoryCanvas(FigureCanvas):
             self.draw()
             return
 
-        # --- Données de base ---
-        t_s = [s.t_s for s in states]           # temps en secondes
-        t_min = [ts / 60.0 for ts in t_s]       # temps en minutes
-        alt = [s.alt_m for s in states]
-        lats = [s.lat_deg for s in states]
-        lons = [s.lon_deg for s in states]
+        # Séparation phases
+        ascent = [s for s in states if s.phase == "ASCENT"]
+        descent = [s for s in states if s.phase == "DESCENT"]
 
-        # Référence = premier point
-        lat0_deg = lats[0]
-        lon0_deg = lons[0]
-        lat0_rad = math.radians(lat0_deg)
+        # ----- coordonnées locales cumulées (UNE SEULE FOIS) -----
+        lat0 = math.radians(states[0].lat_deg)
+        lat_ref = states[0].lat_deg
+        lon_ref = states[0].lon_deg
 
-        # --- Distance horizontale et angle (boussole) ---
-        dist_km: List[float] = []
-        theta: List[float] = []
+        xs = []
+        ys = []
+        dist = []
+        theta = []
 
-        for lat_deg, lon_deg in zip(lats, lons):
-            dlat = math.radians(lat_deg - lat0_deg)
-            dlon = math.radians(lon_deg - lon0_deg)
+        for s in states:
+            dlat = math.radians(s.lat_deg - lat_ref)
+            dlon = math.radians(s.lon_deg - lon_ref)
 
-            # Approx locale : coordonnées métriques autour du point de départ
-            x = simulation.EARTH_RADIUS_M * dlon * math.cos(lat0_rad)  # +x = Est
-            y = simulation.EARTH_RADIUS_M * dlat                       # +y = Nord
+            x = simulation.EARTH_RADIUS_M * dlon * math.cos(lat0) / 1000.0
+            y = simulation.EARTH_RADIUS_M * dlat / 1000.0
 
-            r = math.hypot(x, y) / 1000.0  # km
-            dist_km.append(r)
+            xs.append(x)
+            ys.append(y)
+            dist.append(math.hypot(x, y))
+            theta.append(math.atan2(x, y))
 
-            # Angle façon boussole :
-            #  - 0 rad = Nord
-            #  - +π/2 = Est
-            #  - ±π   = Sud
-            #  - -π/2 = Ouest
-            angle = math.atan2(x, y)
-            theta.append(angle)
+        # Index de burst = fin de montée
+        n_ascent = len(ascent)
 
-        # ---------- 1) Altitude vs temps (min) ----------
-        self.ax_alt.plot(t_min, alt, marker=".")
+        # ---------- 1) Altitude vs temps ----------
+        if ascent:
+            t = [s.t_s / 60.0 for s in ascent]
+            alt = [s.alt_m for s in ascent]
+            self.ax_alt.plot(t, alt, color="cyan", label="Montée")
+
+        if descent:
+            t = [s.t_s / 60.0 for s in descent]
+            alt = [s.alt_m for s in descent]
+            self.ax_alt.plot(t, alt, color="orange", label="Descente")
+
+        self.ax_alt.set_title("Altitude en fonction du temps")
         self.ax_alt.set_xlabel("Temps (min)")
         self.ax_alt.set_ylabel("Altitude (m)")
-        self.ax_alt.set_title("Altitude en fonction du temps")
         self.ax_alt.grid(True)
+        self.ax_alt.legend()
 
-        # ---------- 2) Distance horizontale vs temps (min) ----------
-        self.ax_dist.plot(dist_km, alt, marker=".")
+        # ---------- 2) Altitude vs distance sol (CORRIGÉ) ----------
+        if ascent:
+            self.ax_dist.plot(
+                dist[:n_ascent],
+                [s.alt_m for s in ascent],
+                color="cyan",
+                label="Montée",
+            )
+
+        if descent:
+            self.ax_dist.plot(
+                dist[n_ascent:],
+                [s.alt_m for s in descent],
+                color="orange",
+                label="Descente",
+            )
+
+        self.ax_dist.set_title("Altitude vs distance sol")
         self.ax_dist.set_xlabel("Distance horizontale (km)")
-        self.ax_dist.set_ylabel("Altidude (m)")
-        self.ax_dist.set_title("Altitude et distance sol")
+        self.ax_dist.set_ylabel("Altitude (m)")
         self.ax_dist.grid(True)
+        self.ax_dist.legend()
 
-        # ---------- 3) Trajectoire sol (lon/lat) ----------
-        self.ax_map.plot(lons, lats, marker=".")
+        # ---------- 3) Trajectoire au sol ----------
+        if ascent:
+            self.ax_map.plot(
+                [s.lon_deg for s in ascent],
+                [s.lat_deg for s in ascent],
+                color="cyan",
+                label="Montée",
+            )
+
+        if descent:
+            self.ax_map.plot(
+                [s.lon_deg for s in descent],
+                [s.lat_deg for s in descent],
+                color="orange",
+                label="Descente",
+            )
+
+        self.ax_map.set_title("Trajectoire au sol")
         self.ax_map.set_xlabel("Longitude (°)")
         self.ax_map.set_ylabel("Latitude (°)")
-        self.ax_map.set_title("Trajectoire au sol (lon / lat)")
         self.ax_map.grid(True)
+        self.ax_map.legend()
 
-        # ---------- 4) Vue polaire type boussole ----------
-        self.ax_polar.plot(theta, dist_km, marker=".")
+        # ---------- 4) Vue polaire (CORRIGÉ) ----------
+        if ascent:
+            self.ax_polar.plot(
+                theta[:n_ascent],
+                dist[:n_ascent],
+                color="cyan",
+                label="Montée",
+            )
 
-        # 0° = Nord, sens horaire (comme une boussole)
+        if descent:
+            self.ax_polar.plot(
+                theta[n_ascent:],
+                dist[n_ascent:],
+                color="orange",
+                label="Descente",
+            )
+
         self.ax_polar.set_theta_zero_location("N")
         self.ax_polar.set_theta_direction(-1)
-
-        # Marquage N / E / S / W
-        self.ax_polar.set_thetagrids(
-            [0, 90, 180, 270],
-            labels=["N", "E", "S", "W"],
-        )
-
-        self.ax_polar.set_title("Vue polaire (boussole)\nDistance vs direction")
-        self.ax_polar.set_rlabel_position(135)
-        self.ax_polar.set_ylabel("Distance (km)", labelpad=20)
+        self.ax_polar.set_thetagrids([0, 90, 180, 270], labels=["N", "E", "S", "W"])
+        self.ax_polar.set_title("Vue polaire (boussole)")
         self.ax_polar.grid(True)
+        self.ax_polar.legend(loc="upper right")
 
         self.figure.tight_layout()
         self.draw()
+
+
 
 class MonteCarloCanvas(FigureCanvas):
     def __init__(self, parent: Optional[QWidget] = None):
@@ -707,11 +813,16 @@ class MainWindow(QMainWindow):
         central = QWidget()
         main_layout = QHBoxLayout(central)
 
+
         # ---- Panneau gauche : profils + paramètres + simulation ----
         control_layout = QVBoxLayout()
 
         gb_files = QGroupBox("Profils")
         files_layout = QVBoxLayout()
+
+        self.lbl_ascent_file = QLabel("Profile de Monter")
+        btn_ascent = QPushButton("Charger CSV ascension…")
+        btn_ascent.clicked.connect(self.on_load_ascent_csv)
 
         self.lbl_descent_file = QLabel("Profil de descente : (manuel / CSV)")
         btn_descent = QPushButton("Charger CSV descente…")
@@ -733,6 +844,7 @@ class MainWindow(QMainWindow):
         btn_gfs_dl.clicked.connect(self.on_download_gfs_from_nomads)
 
         files_layout.addWidget(self.lbl_descent_file)
+        files_layout.addWidget(btn_ascent)
         files_layout.addWidget(btn_descent)
         files_layout.addSpacing(10)
         files_layout.addWidget(self.lbl_wind_file)
@@ -794,6 +906,26 @@ class MainWindow(QMainWindow):
             "Si cochée : la descente passe en chute libre en dessous d'une certaine altitude."
         )
         params_layout.addWidget(self.cb_free_fall)
+
+        # Altitude début chute libre (burst réel)
+        row_ff_start = QHBoxLayout()
+        row_ff_start.addWidget(QLabel("Alt. début chute libre (m):"))
+
+        self.sb_ff_start_alt = QDoubleSpinBox()
+        self.sb_ff_start_alt.setRange(0.0, 60000.0)
+        self.sb_ff_start_alt.setSingleStep(500.0)
+        self.sb_ff_start_alt.setDecimals(False)
+        self.sb_ff_start_alt.setValue(0.0)  # 0 = chute libre au burst
+        self.sb_ff_start_alt.setToolTip(
+            "Altitude réelle à laquelle la chute libre commence.\n"
+            "• = altitude de burst → rupture normale\n"
+            "• < burst → rupture après montée\n"
+            "• > burst → rupture pendant la montée"
+        )
+
+        row_ff_start.addWidget(self.sb_ff_start_alt)
+        params_layout.addLayout(row_ff_start)
+
                 # Facteur d'accélération en chute libre
         row_ff_factor = QHBoxLayout()
         row_ff_factor.addWidget(QLabel("Facteur chute libre :"))
@@ -808,23 +940,6 @@ class MainWindow(QMainWindow):
         )
         row_ff_factor.addWidget(self.sb_free_factor)
         params_layout.addLayout(row_ff_factor)
-
-
-        # Altitude de bascule en chute libre
-        row_ff_alt = QHBoxLayout()
-        row_ff_alt.addWidget(QLabel("Alt. chute libre (m):"))
-        self.sb_free_fall_alt = QDoubleSpinBox()
-        self.sb_free_fall_alt.setRange(0.0, 60000.0)
-        self.sb_free_fall_alt.setSingleStep(500.0)
-        self.sb_free_fall_alt.setDecimals(False)
-        self.sb_free_fall_alt.setValue(0.0)  # 0 = full chute libre si activée
-        self.sb_free_fall_alt.setToolTip(
-            "0 = chute libre sur toute la descente.\n"
-            ">0 = parachute au-dessus, chute libre en dessous."
-        )
-
-        row_ff_alt.addWidget(self.sb_free_fall_alt)
-        params_layout.addLayout(row_ff_alt)
 
 
         # Δt
@@ -865,10 +980,11 @@ class MainWindow(QMainWindow):
         self.table_results.setHorizontalHeaderLabels(
             [
                 "Temps écoulé (s)",
+                "Phase",
                 "Alt (m)",
                 "Lat (°)",
                 "Lon (°)",
-                "v_desc (m/s)",
+                "V verticale (m/s)",
                 "u (m/s)",
                 "v (m/s)",
             ]
@@ -925,12 +1041,33 @@ class MainWindow(QMainWindow):
         self.slider_anim.valueChanged.connect(self._on_anim_slider_changed)
 
 
-        # Carte OSM
+        # ================== ONGLET CARTE ==================
         self.map_widget = MapWidget(
             default_lat=self.sb_lat0.value(),
             default_lon=self.sb_lon0.value(),
         )
-        self.tabs.addTab(self.map_widget, "Carte")
+
+        self.tab_map = QWidget()
+        map_layout = QVBoxLayout(self.tab_map)
+
+        # --- barre haute (style carte) ---
+        top_bar = QHBoxLayout()
+        top_bar.addStretch()  # pousse à droite
+
+        lbl_style = QLabel("Style :")
+        self.cb_map_style = QComboBox()
+        self.cb_map_style.addItems(MAP_STYLES.keys())
+        self.cb_map_style.setCurrentText("Sombre (recommandé)")
+
+        top_bar.addWidget(lbl_style)
+        top_bar.addWidget(self.cb_map_style)
+
+        map_layout.addLayout(top_bar)
+        map_layout.addWidget(self.map_widget)
+
+        self.tabs.addTab(self.tab_map, "Carte")
+
+        self.cb_map_style.currentTextChanged.connect(self.on_map_style_changed)
 
         # Profil descente (éditable directement)
         self.table_profile_desc = QTableWidget()
@@ -940,6 +1077,12 @@ class MainWindow(QMainWindow):
             "Profil de descente en fonction de l'altitude. Tu peux éditer les valeurs ici."
         )
         self.tabs.addTab(self.table_profile_desc, "Profil descente")
+
+        # Profil ascension
+        self.table_profile_ascent = QTableWidget()
+        self.table_profile_ascent.setColumnCount(2)
+        self.table_profile_ascent.setHorizontalHeaderLabels(["Alt (m)", "Vasc (m/s)"])
+        self.tabs.addTab(self.table_profile_ascent, "Profil ascension")
 
         # Profil vent (éditable directement)
         self.table_profile_wind = QTableWidget()
@@ -990,7 +1133,11 @@ class MainWindow(QMainWindow):
         self.btn_anim_play.setIcon(app_icon("play"))
         self.btn_anim_stop.setIcon(app_icon("pause"))
         self.btn_anim_reset.setIcon(app_icon("reset_view"))
-        
+
+    def on_map_style_changed(self, style_name: str):
+        tile = MAP_STYLES.get(style_name, "CartoDB dark_matter")
+        self.map_widget.set_map_style(tile)
+            
     def _on_reset_3d_view(self):
         # recadre la vue 3D sur toute la trajectoire
         self.canvas3d.reset_view()
@@ -1237,6 +1384,26 @@ class MainWindow(QMainWindow):
         self.lbl_wind_file.setText(f"Profil de vent : GFS NOMADS {out_name}")
 
 
+    def on_load_ascent_csv(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choisir le CSV de profil de monter",
+            "",
+            "CSV (*.csv);;Tous les fichiers (*)",
+        )
+        if not path:
+            return
+
+        try:
+            points = self._read_ascent_csv_points(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur chargement montée", str(e))
+            return
+
+        self._fill_ascent_table_from_points(points)
+        self.lbl_ascent_file.setText(f"Profil de montée : {path}")
+
+
     def on_load_descent_csv(self):
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -1305,6 +1472,14 @@ class MainWindow(QMainWindow):
         self._fill_wind_table_from_points(points)
         self.lbl_wind_file.setText(f"Profil de vent : GFS {path}")
     
+    def _has_valid_ascent_profile(self) -> bool:
+        for row in range(self.table_profile_ascent.rowCount()):
+            ia = self.table_profile_ascent.item(row, 0)
+            iv = self.table_profile_ascent.item(row, 1)
+            if ia and iv and ia.text().strip() and iv.text().strip():
+                return True
+        return False
+    
 
     def on_simulate(self):
         alt0 = self.sb_alt0.value()
@@ -1316,39 +1491,58 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Paramètre invalide", "L'altitude initiale doit être > 0.")
             return
 
-        # Profil vent
+        # ---------- PROFILS ----------
         try:
             wind_profile = self._get_wind_profile_from_table()
-        except ValueError as e:
-            QMessageBox.warning(self, "Profil vent invalide", str(e))
-            return
-
-        # Profil descente effectif (parachute + éventuelle chute libre)
-        try:
             descent_profile = self._build_effective_descent_profile(alt0_m=alt0)
         except ValueError as e:
-            QMessageBox.warning(self, "Profil descente invalide", str(e))
+            QMessageBox.warning(self, "Profil invalide", str(e))
             return
 
+        use_ascent = self._has_valid_ascent_profile()
+
+        # ---------- CHUTE LIBRE ----------
+        ff_alt = self.sb_ff_start_alt.value() if self.cb_free_fall.isChecked() else None
+        ff_factor = self.sb_free_factor.value()
+
         try:
-            self.current_states = simulate_descent(
-                alt0_m=alt0,
-                lat0_deg=lat0,
-                lon0_deg=lon0,
-                dt_s=dt,
-                descent_profile=descent_profile,
-                wind_profile=wind_profile,
-            )
+            if use_ascent:
+                ascent_profile = self._build_effective_ascent_profile()
+
+                self.current_states = simulate_flight(
+                    alt_start_m=0.0,
+                    alt_burst_m=alt0,
+                    lat0_deg=lat0,
+                    lon0_deg=lon0,
+                    dt_s=dt,
+                    ascent_profile=ascent_profile,
+                    descent_profile=descent_profile,
+                    wind_profile=wind_profile,
+                    ff_start_alt=ff_alt,
+                    free_fall_factor=ff_factor,
+                )
+            else:
+                # mode descente seule
+                self.current_states = simulate_descent(
+                    alt0_m=alt0,
+                    lat0_deg=lat0,
+                    lon0_deg=lon0,
+                    dt_s=dt,
+                    descent_profile=descent_profile,
+                    wind_profile=wind_profile,
+                )
+
         except Exception as e:
             QMessageBox.critical(self, "Erreur simulation", str(e))
             return
 
+        # ---------- AFFICHAGE ----------
         self._populate_results_table(self.current_states)
         self.canvas.plot_trajectory(self.current_states)
         self.canvas3d.plot_trajectory_3d(self.current_states)
         self.map_widget.show_trajectory(self.current_states)
 
-        # Config timeline 3D
+        # ---------- ANIMATION 3D ----------
         n = len(self.current_states)
         self.anim_timer.stop()
         self.btn_anim_play.setEnabled(n > 1)
@@ -1362,9 +1556,8 @@ class MainWindow(QMainWindow):
             self._update_3d_frame(0)
         else:
             self.slider_anim.setEnabled(False)
-            self.slider_anim.setMinimum(0)
-            self.slider_anim.setMaximum(0)
             self.lbl_anim_time.setText("t = 0.0 s")
+
 
 
 
@@ -1384,6 +1577,26 @@ class MainWindow(QMainWindow):
                 self.table_profile_desc.setItem(i, j, item)
         self.table_profile_desc.resizeColumnsToContents()
 
+    def _fill_ascent_table_from_points(self, points: List[AscentPoint]):
+        """
+        Remplit la table 'Profil ascension' à partir d'une liste de AscentPoint.
+        Affichage en entiers (comme la descente), tri par altitude décroissante.
+        """
+        self.table_profile_ascent.setRowCount(len(points))
+
+        for i, p in enumerate(sorted(points, key=lambda x: x.alt_m, reverse=True)):
+            alt_int = int(round(p.alt_m))
+            v_int = int(round(p.ascent_ms))
+
+            vals = [alt_int, v_int]
+            for j, v in enumerate(vals):
+                item = QTableWidgetItem(str(v))  # affichage entier
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                self.table_profile_ascent.setItem(i, j, item)
+
+        self.table_profile_ascent.resizeColumnsToContents()
 
     def _fill_wind_table_from_points(self, points: List[WindPoint]):
         self.table_profile_wind.setRowCount(len(points))
@@ -1396,6 +1609,24 @@ class MainWindow(QMainWindow):
                 )
                 self.table_profile_wind.setItem(i, j, item)
         self.table_profile_wind.resizeColumnsToContents()
+
+    def _get_ascent_profile_from_table(self) -> AscentProfile:
+        points: List[AscentPoint] = []
+        for row in range(self.table_profile_ascent.rowCount()):
+            ia = self.table_profile_ascent.item(row, 0)
+            iv = self.table_profile_ascent.item(row, 1)
+            if not ia or not iv:
+                continue
+            try:
+                alt = float(ia.text().replace(",", "."))
+                v = float(iv.text().replace(",", "."))
+            except ValueError:
+                continue
+            points.append(AscentPoint(alt_m=alt, ascent_ms=v))
+
+        if not points:
+            raise ValueError("Profil ascendant vide.")
+        return AscentProfile(points)
 
     def _get_descent_profile_from_table(self) -> DescentProfile:
         points: List[DescentPoint] = []
@@ -1486,39 +1717,79 @@ class MainWindow(QMainWindow):
         """
         # 1) profil base depuis la table
         base_profile = self._get_descent_profile_from_table()
-        scaled_base = self._scale_descent_profile_for_mass(base_profile)
-
-        # 2) si pas de chute libre -> on renvoie tel quel
-        if not self.cb_free_fall.isChecked():
-            return scaled_base
-
-        ff_alt = float(self.sb_free_fall_alt.value())
-        # facteur d'accélération en chute libre (tu peux le régler)
-        factor_free = float(self.sb_free_factor.value())
+        return self._scale_descent_profile_for_mass(base_profile)
 
 
-        points: List[DescentPoint] = []
-        for p in scaled_base.points:
-            v = p.descent_ms
+    def _build_effective_ascent_profile(self) -> AscentProfile:
+        """
+        Construit le profil d'ascension effectif :
+        - profil table ascension
+        - éventuel facteur lié à la masse (option simple et réaliste)
+        """
+        # 1) profil base depuis la table
+        base_profile = self._get_ascent_profile_from_table()
 
-            if ff_alt <= 0.0:
-                # ff_alt = 0 => chute libre sur toute la descente
-                v = v * factor_free
-            else:
-                # chute libre en-dessous de ff_alt
-                if p.alt_m <= ff_alt:
-                    v = v * factor_free
+        m = self.sb_mass.value()
+        if m <= 0:
+            return base_profile
 
-            # sécurité, éviter les vitesses verticales trop petites
-            v = max(v, 0.5)
-            points.append(DescentPoint(alt_m=p.alt_m, descent_ms=v))
+        # Masse de référence implicite du profil (1 kg)
+        m_ref = 1.0
 
-        return DescentProfile(points)
+        # En montée ballon : plus lourd = montée plus lente
+        # modèle simple : v ~ 1 / sqrt(m)
+        factor = math.sqrt(m_ref / m)
 
+        points: List[AscentPoint] = []
+        for p in base_profile.points:
+            v = p.ascent_ms * factor
 
+            # sécurité : éviter montée nulle ou négative
+            v = max(v, 0.2)
 
+            points.append(
+                AscentPoint(
+                    alt_m=p.alt_m,
+                    ascent_ms=v,
+                )
+            )
+
+        return AscentProfile(points)
 
     # ---------- Lecture CSV ----------
+
+    def _read_ascent_csv_points(self, path: str) -> List[AscentPoint]:
+        """
+        Lit un CSV de profil ascendant.
+        Colonnes attendues (noms tolérants) :
+        - altitude : alt, altitude
+        - vitesse montée : ascent, montée, vit, vitesse
+        """
+        points: List[AscentPoint] = []
+
+        with open(path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f, delimiter=";")
+            columns = {name.lower(): name for name in (reader.fieldnames or [])}
+
+            def find_col(keys):
+                for k in keys:
+                    for c in columns:
+                        if k in c:
+                            return columns[c]
+                raise ValueError(f"Colonne manquante dans {path}: {keys}")
+
+            alt_col = find_col(["alt"])
+            asc_col = find_col(["ascent", "mont", "vit", "vitesse"])
+
+            for row in reader:
+                alt = float(row[alt_col].replace(",", "."))
+                asc = float(row[asc_col].replace(",", "."))
+                points.append(AscentPoint(alt_m=alt, ascent_ms=asc))
+
+        if not points:
+            raise ValueError("Aucun point lu dans le CSV d'ascension")
+
+        return points
 
     def _read_descent_csv_points(self, path: str) -> List[DescentPoint]:
         points: List[DescentPoint] = []
@@ -1575,24 +1846,39 @@ class MainWindow(QMainWindow):
     # ---------- Table résultats ----------
 
     def _populate_results_table(self, states: List[State]):
-        self.table_results.setRowCount(0)
         self.table_results.setRowCount(len(states))
 
         for i, s in enumerate(states):
+
+            # vitesse verticale lisible
+            if s.phase == "ASCENT":
+                v_vert = abs(s.descent_ms)
+            else:
+                v_vert = abs(s.descent_ms)
+
             values = [
-                s.t_s,
-                s.alt_m,
-                s.lat_deg,
-                s.lon_deg,
-                s.descent_ms,
-                s.wind_u_ms,
-                s.wind_v_ms,
+                f"{s.t_s:.1f}",
+                s.phase,
+                f"{s.alt_m:.0f}",
+                f"{s.lat_deg:.5f}",
+                f"{s.lon_deg:.5f}",
+                f"{v_vert:.2f}",
+                f"{s.wind_u_ms:.2f}",
+                f"{s.wind_v_ms:.2f}",
             ]
+
             for j, v in enumerate(values):
-                item = QTableWidgetItem(f"{v:.6f}")
+                item = QTableWidgetItem(v)
                 item.setTextAlignment(
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
+
+                # Mise en couleur par phase (lisibilité ++)
+                if s.phase == "ASCENT":
+                    item.setForeground(Qt.GlobalColor.cyan)
+                else:
+                    item.setForeground(Qt.GlobalColor.yellow)
+
                 self.table_results.setItem(i, j, item)
 
         self.table_results.resizeColumnsToContents()

@@ -9,6 +9,10 @@ class DescentPoint:
     alt_m: float
     descent_ms: float  # >0 vers le bas
 
+@dataclass
+class AscentPoint:
+    alt_m: float
+    ascent_ms: float  # >0 vers le haut
 
 @dataclass
 class WindPoint:
@@ -39,6 +43,29 @@ class DescentProfile:
                 return p1.descent_ms + ratio * (p2.descent_ms - p1.descent_ms)
 
         return self.points[-1].descent_ms
+    
+class AscentProfile:
+    """Profil alt -> vitesse de montée (m/s) avec interpolation linéaire."""
+
+    def __init__(self, points: List[AscentPoint]):
+        if not points:
+            raise ValueError("Profil de montée vide")
+        self.points = sorted(points, key=lambda p: p.alt_m)
+
+    def value(self, alt_m: float) -> float:
+        if alt_m <= self.points[0].alt_m:
+            return self.points[0].ascent_ms
+        if alt_m >= self.points[-1].alt_m:
+            return self.points[-1].ascent_ms
+
+        for i in range(len(self.points) - 1):
+            p1 = self.points[i]
+            p2 = self.points[i + 1]
+            if p1.alt_m <= alt_m <= p2.alt_m:
+                ratio = (alt_m - p1.alt_m) / (p2.alt_m - p1.alt_m)
+                return p1.ascent_ms + ratio * (p2.ascent_ms - p1.ascent_ms)
+
+        return self.points[-1].ascent_ms
 
 
 class WindProfile:
