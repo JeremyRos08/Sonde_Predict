@@ -6,8 +6,8 @@ import random
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from profiles import AscentProfile, DescentProfile, WindProfile, DescentPoint, WindPoint
-from simulation import simulate_flight, EARTH_RADIUS_M
+from App.profiles import AscentProfile, DescentProfile, WindProfile, DescentPoint, WindPoint
+from App.simulation import simulate_flight, EARTH_RADIUS_M
 
 
 # ============================================================

@@ -7,7 +7,7 @@ from typing import List
 
 import xarray as xr
 
-from profiles import WindPoint
+from App.profiles import WindPoint
 
 
 def pressure_hpa_to_alt_m(p_hpa: float) -> float:

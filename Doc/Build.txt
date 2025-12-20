@@ -1,0 +1,5 @@
+ Build windows:
+ 'pip install pyinstaller
+
+ Commande:
+ pyinstaller --noconsole --onefile --name Sonde_Predict --icon resources/icons/app.ico --add-data "CSV;CSV" --add-data "resources;resources" --add-data "gfs_data;gfs_data" --hidden-import=cfgrib --hidden-import=eccodes  --hidden-import=xarray main.py

@@ -4,14 +4,14 @@ from __future__ import annotations
 import os
 import csv
 import math
-import simulation
-from simulation import simulate_descent, simulate_flight, State
-from profiles import AscentProfile, AscentPoint
-import gfs_utils
+from App import simulation
+from App.simulation import simulate_descent, simulate_flight, State
+from App.profiles import AscentProfile, AscentPoint
+from App import gfs_utils
 import requests
-import gfs_download
+from App import gfs_download
 import datetime
-from map_widget import MAP_STYLES
+from App.map_widget import MAP_STYLES
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QSlider
@@ -20,7 +20,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 # nécessaire pour le 3D
 from PyQt5.QtWidgets import QSizePolicy
 
 from typing import List, Optional
-from montecarlo import ImpactSample, EllipseResult, run_monte_carlo
+from App.montecarlo import ImpactSample, EllipseResult, run_monte_carlo
 from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg as FigureCanvas,
     NavigationToolbar2QT as NavigationToolbar,
@@ -54,14 +54,13 @@ from PyQt5.QtWidgets import (
 
 )
 
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-from profiles import DescentProfile, WindProfile, DescentPoint, WindPoint
-from simulation import simulate_descent, State
-from map_widget import MapWidget
+from App.profiles import DescentProfile, WindProfile, DescentPoint, WindPoint
+from App.simulation import simulate_descent, State
+from App.map_widget import MapWidget
 
-from version import __version__
+from App.version import __version__
 
 import matplotlib as mpl
 

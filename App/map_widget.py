@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Optional
 import folium
 from PyQt5.QtWebEngineWidgets import QWebEngineView
-from simulation import State
+from App.simulation import State
 
 # Styles disponibles
 MAP_STYLES = {

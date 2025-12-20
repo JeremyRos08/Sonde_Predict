@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass
 from typing import List
 
-from profiles import DescentProfile, AscentProfile, WindProfile
+from App.profiles import DescentProfile, AscentProfile, WindProfile
 
 EARTH_RADIUS_M = 6371000.0
 
