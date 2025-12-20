@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from typing import List, Optional
+
 import folium
 from PyQt5.QtWebEngineWidgets import QWebEngineView
+
+# Import du State de la simulation
 from App.simulation import State
 
-# Styles disponibles
+
+# =========================================================
+# Styles de cartes disponibles (Folium / Leaflet)
+# =========================================================
 MAP_STYLES = {
     "Sombre (recommandé)": "CartoDB dark_matter",
     "Sombre doux": "CartoDB positron",
@@ -14,40 +20,55 @@ MAP_STYLES = {
     "Gris sobre": "Esri.WorldGrayCanvas",
 }
 
+
 class MapWidget(QWebEngineView):
+    """
+    Widget carte basé sur Folium + QWebEngineView.
+
+    - Affiche une carte centrée sur la position initiale
+    - Trace la trajectoire montée / descente
+    - Marque les points clés : lancement, burst, impact
+    - Permet de changer dynamiquement le style de carte
+    """
+
     def __init__(
         self,
         parent=None,
-        default_lat: float = 48.00,
-        default_lon: float = 2.00,
+        default_lat: float = 48.0,
+        default_lon: float = 2.0,
         default_zoom: int = 6,
     ):
         super().__init__(parent)
 
+        # Paramètres par défaut
         self.default_lat = default_lat
         self.default_lon = default_lon
         self.default_zoom = default_zoom
 
-        self._tile_style = "CartoDB dark_matter"
+        # Style de carte actif
+        self._tile_style: str = "CartoDB dark_matter"
+
+        # Dernière trajectoire affichée
         self._last_states: List[State] = []
 
+        # Affiche la carte vide au démarrage
         self.show_base_map()
 
-    # -----------------------------------------------------
-    # Base map
-    # -----------------------------------------------------
+    # =====================================================
+    # Carte de base
+    # =====================================================
     def show_base_map(
         self,
         lat: Optional[float] = None,
         lon: Optional[float] = None,
         zoom: Optional[int] = None,
     ):
-        if lat is None:
-            lat = self.default_lat
-        if lon is None:
-            lon = self.default_lon
-        if zoom is None:
-            zoom = self.default_zoom
+        """
+        Affiche une carte vide centrée sur les coordonnées données.
+        """
+        lat = lat if lat is not None else self.default_lat
+        lon = lon if lon is not None else self.default_lon
+        zoom = zoom if zoom is not None else self.default_zoom
 
         m = folium.Map(
             location=(lat, lon),
@@ -65,24 +86,19 @@ class MapWidget(QWebEngineView):
         self.setHtml(m.get_root().render())
 
     def clear_map(self):
+        """
+        Efface la trajectoire et revient à la carte de base.
+        """
         self._last_states = []
         self.show_base_map()
 
-    # -----------------------------------------------------
-    # Style
-    # -----------------------------------------------------
+    # =====================================================
+    # Gestion du style de carte
+    # =====================================================
     def set_map_style(self, tile_style: str):
-        self._tile_style = tile_style
-
-        if self._last_states:
-            self.show_trajectory(self._last_states)
-        else:
-            self.show_base_map()
-
-    #-------------------------------------------------------
-    # Fallback
-    #-------------------------------------------------------
-    def set_map_style(self, tile_style: str):
+        """
+        Change le style de carte (tiles).
+        """
         try:
             self._tile_style = tile_style
             if self._last_states:
@@ -90,27 +106,32 @@ class MapWidget(QWebEngineView):
             else:
                 self.show_base_map()
         except Exception:
+            # fallback de sécurité
             self._tile_style = "CartoDB dark_matter"
             self.show_base_map()
 
-    # -----------------------------------------------------
-    # Trajectoire
-    # -----------------------------------------------------
+    # =====================================================
+    # Affichage de la trajectoire
+    # =====================================================
     def show_trajectory(self, states: List[State]):
+        """
+        Affiche la trajectoire complète sur la carte.
+        """
         self._last_states = states
 
         if not states:
             self.show_base_map()
             return
 
+        # Séparation montée / descente
         ascent = [s for s in states if s.phase == "ASCENT"]
         descent = [s for s in states if s.phase == "DESCENT"]
 
-        center = (
-            (ascent[-1].lat_deg, ascent[-1].lon_deg)
-            if ascent
-            else (states[0].lat_deg, states[0].lon_deg)
-        )
+        # Centre de la carte
+        if ascent:
+            center = (ascent[-1].lat_deg, ascent[-1].lon_deg)
+        else:
+            center = (states[0].lat_deg, states[0].lon_deg)
 
         m = folium.Map(
             location=center,
@@ -125,7 +146,9 @@ class MapWidget(QWebEngineView):
             control=False,
         ).add_to(m)
 
-        # ---------------- Montée ----------------
+        # ------------------------
+        # Montée
+        # ------------------------
         if ascent:
             folium.PolyLine(
                 [(s.lat_deg, s.lon_deg) for s in ascent],
@@ -140,7 +163,9 @@ class MapWidget(QWebEngineView):
             self._add_label(m, launch, "🚀 Lancement", "#00ff88")
             self._add_label(m, burst, "💥 Burst", "#ff4444")
 
-        # ---------------- Descente ----------------
+        # ------------------------
+        # Descente
+        # ------------------------
         if descent:
             folium.PolyLine(
                 [(s.lat_deg, s.lon_deg) for s in descent],
@@ -155,10 +180,13 @@ class MapWidget(QWebEngineView):
 
         self.setHtml(m.get_root().render())
 
-    # -----------------------------------------------------
-    # Label helper
-    # -----------------------------------------------------
+    # =====================================================
+    # Helpers
+    # =====================================================
     def _add_label(self, m, s: State, title: str, color: str):
+        """
+        Ajoute une étiquette HTML stylée sur la carte.
+        """
         folium.Marker(
             location=(s.lat_deg, s.lon_deg),
             icon=folium.DivIcon(

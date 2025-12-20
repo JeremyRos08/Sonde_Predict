@@ -1,5 +1,12 @@
-# gfs_download.py
 from __future__ import annotations
+
+"""
+Gestion du téléchargement des données GFS depuis NOMADS (NOAA).
+
+Ce module me sert à :
+- construire proprement une URL GFS 0.25° filtrée (zone, niveaux, variables)
+- télécharger un fichier GRIB2 en gérant les cas d'erreur (404, réseau)
+"""
 
 from typing import List
 from urllib.parse import urlencode, quote_plus
@@ -7,6 +14,7 @@ from urllib.parse import urlencode, quote_plus
 import requests
 
 
+# URL de base NOMADS pour GFS 0.25°
 BASE_URL = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
 
 
@@ -23,14 +31,24 @@ def build_gfs_url(
     all_levels: bool,
 ) -> str:
     """
-    Construit l'URL NOMADS pour GFS 0.25°.
-    Ex:
-      file=gfs.t12z.pgrb2.0p25.f000
-      dir=/gfs.YYYYMMDD/12/atmos
+    Construit l'URL NOMADS pour télécharger un sous-ensemble GFS 0.25°.
+
+    Je filtre directement côté serveur :
+    - la zone géographique
+    - les niveaux de pression
+    - les variables météo (UGRD, VGRD, TMP, etc.)
+
+    Exemple de fichier ciblé :
+      gfs.t12z.pgrb2.0p25.f003
     """
+
+    # Nom du fichier GFS (run + échéance)
     file_name = f"gfs.t{cycle_hour:02d}z.pgrb2.0p25.f{fhour:03d}"
+
+    # Répertoire NOMADS correspondant
     dir_path = f"/gfs.{date_yyyymmdd}/{cycle_hour:02d}/atmos"
 
+    # Paramètres géographiques de base
     params = {
         "file": file_name,
         "dir": dir_path,
@@ -40,60 +58,72 @@ def build_gfs_url(
         "bottomlat": lat_min,
     }
 
-    # Niveaux
+    # ----- NIVEAUX -----
+    # Soit je prends tous les niveaux, soit une liste précise en hPa
     if all_levels:
         params["all_lev"] = "on"
     else:
         for lev in levels_hpa:
-            key = f"lev_{int(lev)}_mb"
-            params[key] = "on"
+            params[f"lev_{int(lev)}_mb"] = "on"
 
-    # Variables (UGRD, VGRD, TMP, etc.)
-    for v in vars_:
-        key = f"var_{v}"
-        params[key] = "on"
+    # ----- VARIABLES -----
+    # Ex : UGRD, VGRD, TMP…
+    for var in vars_:
+        params[f"var_{var}"] = "on"
 
+    # Encodage propre de l'URL
     query = urlencode(params, doseq=True, quote_via=quote_plus)
     return f"{BASE_URL}?{query}"
 
 
 def download_gfs(url: str, output_path: str, timeout: int = 120) -> bool:
     """
-    Télécharge un GRIB2 GFS depuis NOMADS.
-    Retourne True si OK, False si fichier indisponible (404).
+    Télécharge un fichier GRIB2 GFS depuis NOMADS.
+
+    Je retourne :
+    - True  → téléchargement OK
+    - False → fichier non disponible (404 ou erreur réseau)
+
+    Le téléchargement est fait en streaming pour éviter de charger
+    tout le fichier en mémoire.
     """
+
     print(f"[GFS] URL : {url}")
 
     try:
-        with requests.get(url, stream=True, timeout=timeout) as r:
+        with requests.get(url, stream=True, timeout=timeout) as response:
 
-            if r.status_code == 404:
-                print("[GFS] ❌ 404 – fichier non disponible")
+            # Cas classique NOMADS : fichier pas encore publié
+            if response.status_code == 404:
+                print("[GFS] ❌ 404 – fichier non disponible sur NOMADS")
                 return False
 
-            r.raise_for_status()
+            # Autres erreurs HTTP
+            response.raise_for_status()
 
-            total = int(r.headers.get("Content-Length", "0")) or None
+            total_size = int(response.headers.get("Content-Length", "0")) or None
             downloaded = 0
-            chunk_size = 1024 * 1024
+            chunk_size = 1024 * 1024  # 1 Mo
 
             with open(output_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=chunk_size):
+                for chunk in response.iter_content(chunk_size=chunk_size):
                     if not chunk:
                         continue
+
                     f.write(chunk)
                     downloaded += len(chunk)
 
-                    if total:
-                        pct = 100.0 * downloaded / total
+                    # Affichage progression lisible
+                    if total_size:
+                        pct = 100.0 * downloaded / total_size
                         print(
-                            f"\r[GFS] {downloaded/1e6:6.1f} / {total/1e6:6.1f} Mo ({pct:5.1f}%)",
-                            end=""
+                            f"\r[GFS] {downloaded/1e6:6.1f} / {total_size/1e6:6.1f} Mo ({pct:5.1f}%)",
+                            end="",
                         )
                     else:
                         print(
                             f"\r[GFS] {downloaded/1e6:6.1f} Mo téléchargés",
-                            end=""
+                            end="",
                         )
 
         print("\n[GFS] ✅ Téléchargement terminé")
@@ -102,4 +132,3 @@ def download_gfs(url: str, output_path: str, timeout: int = 120) -> bool:
     except requests.RequestException as e:
         print(f"\n[GFS] ❌ Erreur réseau : {e}")
         return False
-
