@@ -57,29 +57,49 @@ def build_gfs_url(
     return f"{BASE_URL}?{query}"
 
 
-def download_gfs(url: str, output_path: str, timeout: int = 120):
+def download_gfs(url: str, output_path: str, timeout: int = 120) -> bool:
     """
-    Télécharge le GRIB2 depuis NOMADS et l'enregistre dans output_path.
+    Télécharge un GRIB2 GFS depuis NOMADS.
+    Retourne True si OK, False si fichier indisponible (404).
     """
     print(f"[GFS] URL : {url}")
-    print(f"[GFS] Téléchargement vers : {output_path}")
 
-    with requests.get(url, stream=True, timeout=timeout) as r:
-        r.raise_for_status()
-        total = int(r.headers.get("Content-Length", "0")) or None
-        downloaded = 0
-        chunk_size = 1024 * 1024
+    try:
+        with requests.get(url, stream=True, timeout=timeout) as r:
 
-        with open(output_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=chunk_size):
-                if not chunk:
-                    continue
-                f.write(chunk)
-                downloaded += len(chunk)
-                if total:
-                    pct = 100.0 * downloaded / total
-                    print(f"\r[GFS] {downloaded/1e6:6.1f} / {total/1e6:6.1f} Mo ({pct:5.1f}%)", end="")
-                else:
-                    print(f"\r[GFS] {downloaded/1e6:6.1f} Mo téléchargés", end="")
+            if r.status_code == 404:
+                print("[GFS] ❌ 404 – fichier non disponible")
+                return False
 
-    print("\n[GFS] Téléchargement terminé.")
+            r.raise_for_status()
+
+            total = int(r.headers.get("Content-Length", "0")) or None
+            downloaded = 0
+            chunk_size = 1024 * 1024
+
+            with open(output_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=chunk_size):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    downloaded += len(chunk)
+
+                    if total:
+                        pct = 100.0 * downloaded / total
+                        print(
+                            f"\r[GFS] {downloaded/1e6:6.1f} / {total/1e6:6.1f} Mo ({pct:5.1f}%)",
+                            end=""
+                        )
+                    else:
+                        print(
+                            f"\r[GFS] {downloaded/1e6:6.1f} Mo téléchargés",
+                            end=""
+                        )
+
+        print("\n[GFS] ✅ Téléchargement terminé")
+        return True
+
+    except requests.RequestException as e:
+        print(f"\n[GFS] ❌ Erreur réseau : {e}")
+        return False
+

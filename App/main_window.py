@@ -133,6 +133,41 @@ class ThreeDCanvas(FigureCanvas):
         lon0_deg = lons[0]
         lat0_rad = math.radians(lat0_deg)
 
+        # ---------- Séparation des phases ----------
+        ascent = [s for s in states if s.phase == "ASCENT"]
+        descent = [s for s in states if s.phase == "DESCENT"]
+
+        def to_xyz(sub):
+            xs, ys, zs = [], [], []
+            for s in sub:
+                dlat = math.radians(s.lat_deg - lat0_deg)
+                dlon = math.radians(s.lon_deg - lon0_deg)
+                xs.append(simulation.EARTH_RADIUS_M * dlon * math.cos(lat0_rad) / 1000.0)
+                ys.append(simulation.EARTH_RADIUS_M * dlat / 1000.0)
+                zs.append(s.alt_m)
+            return xs, ys, zs
+
+        # ---------- Tracé montée ----------
+        if ascent:
+            xa, ya, za = to_xyz(ascent)
+            self.ax3d.plot(
+                xa, ya, za,
+                color="cyan",
+                linewidth=1.6,
+                label="Montée",
+            )
+
+        # ---------- Tracé descente ----------
+        if descent:
+            xd, yd, zd = to_xyz(descent)
+            self.ax3d.plot(
+                xd, yd, zd,
+                color="orange",
+                linewidth=1.6,
+                label="Descente",
+            )
+
+
         xs_km: List[float] = []
         ys_km: List[float] = []
 
@@ -149,9 +184,6 @@ class ThreeDCanvas(FigureCanvas):
         self._xs_km = xs_km
         self._ys_km = ys_km
         self._alts = alts
-
-        # Trajectoire complète
-        
 
         # Limites Z
         zmax = max(alts)
@@ -198,7 +230,7 @@ class ThreeDCanvas(FigureCanvas):
         
         self.draw()
 
-        
+      
 
     def reset_view(self):
         """Recalcule complètement la vue 3D à partir de la dernière simulation."""
@@ -249,70 +281,82 @@ class ThreeDCanvas(FigureCanvas):
 
 # ---------- Canvas trajectoire 2D ----------
 
+
 class TrajectoryCanvas(FigureCanvas):
     def __init__(self, parent: Optional[QWidget] = None):
-        fig = Figure(figsize=(7, 7))
-        super().__init__(fig)
+        self.figure = Figure(figsize=(7, 7))
+        super().__init__(self.figure)
         self.setParent(parent)
 
-        # 4 sous-graphiques : 2 x 2
-        self.ax_alt = fig.add_subplot(2, 2, 1)                        # Altitude vs temps
-        self.ax_dist = fig.add_subplot(2, 2, 2)                       # Distance vs temps
-        self.ax_map = fig.add_subplot(2, 2, 3)                        # Trajectoire sol
-        self.ax_polar = fig.add_subplot(2, 2, 4, projection="polar")  # Vue polaire / boussole
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.updateGeometry()
+       
+        self.info_label = None
 
-        fig.patch.set_facecolor("#717171")
-        for ax in (self.ax_alt, self.ax_dist, self.ax_map, self.ax_polar):
-            ax.set_facecolor("#717171")         # fond à l'intérieur du graph
+        self.mpl_connect("motion_notify_event", self._on_mouse_move)
+        self.current_states: list[State] | None = None
 
-    def extract(states):
-        t_min = [s.t_s / 60.0 for s in states]
-        alt = [s.alt_m for s in states]
-        lats = [s.lat_deg for s in states]
-        lons = [s.lon_deg for s in states]
-        return t_min, alt, lats, lons  
-    
-class TrajectoryCanvas(FigureCanvas):
-    def __init__(self, parent: Optional[QWidget] = None):
-        fig = Figure(figsize=(7, 7))
-        super().__init__(fig)
-        self.setParent(parent)
+        
+        self.states: List[State] = []
+        self.cursor_lines = {}
+        self.cursor_points = {}
 
         # 4 sous-graphiques : 2 x 2
-        self.ax_alt = fig.add_subplot(2, 2, 1)                        # Altitude vs temps
-        self.ax_dist = fig.add_subplot(2, 2, 2)                       # Altitude vs distance
-        self.ax_map = fig.add_subplot(2, 2, 3)                        # Trajectoire sol
-        self.ax_polar = fig.add_subplot(2, 2, 4, projection="polar")  # Vue polaire
+        self.ax_alt = self.figure.add_subplot(2, 2, 1)
+        self.ax_dist = self.figure.add_subplot(2, 2, 2)
+        self.ax_map = self.figure.add_subplot(2, 2, 3)
+        self.ax_polar = self.figure.add_subplot(2, 2, 4, projection="polar")
+
 
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.updateGeometry()
+        
 
-        fig.patch.set_facecolor("#717171")
+        # 🎨 thème sombre
+        self.figure.patch.set_facecolor("#2b2b2b")
         for ax in (self.ax_alt, self.ax_dist, self.ax_map, self.ax_polar):
-            ax.set_facecolor("#717171")
+            ax.set_facecolor("#2b2b2b")
+            ax.tick_params(colors="white")
+            for spine in ax.spines.values():
+                spine.set_color("white")
 
-    # ---------- utilitaires ----------
+        import matplotlib.ticker as mticker
+        # Empêche matplotlib d'afficher (x,y) automatiques
+        for ax in (self.ax_alt, self.ax_dist, self.ax_map, self.ax_polar):
+            ax.format_coord = lambda x, y: ""
+
+        for ax in (self.ax_alt, self.ax_dist, self.ax_map):
+            ax.ticklabel_format(style="plain", useOffset=False)
+        self.ax_alt.xaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+        self.ax_alt.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
+        self.ax_dist.xaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+        self.ax_dist.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
+        self.ax_map.xaxis.set_major_formatter(mticker.FormatStrFormatter("%.5f"))
+        self.ax_map.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.5f"))
+        
+        self.ax_polar.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))    
+
+        self.draw_idle()   
+
+    # =========================================================
+    # Utilitaires
+    # =========================================================
 
     def _split_phases(self, states: List[State]):
         ascent = [s for s in states if s.phase == "ASCENT"]
         descent = [s for s in states if s.phase == "DESCENT"]
         return ascent, descent
 
-    def _local_xy_km(self, states: List[State]):
-        lat0 = math.radians(states[0].lat_deg)
+    def _compute_local_xy_km(self, states: List[State]):
+        lat0_rad = math.radians(states[0].lat_deg)
         lat_ref = states[0].lat_deg
         lon_ref = states[0].lon_deg
 
-        xs = []
-        ys = []
+        xs, ys = [], []
 
         for s in states:
             dlat = math.radians(s.lat_deg - lat_ref)
             dlon = math.radians(s.lon_deg - lon_ref)
 
-            x = simulation.EARTH_RADIUS_M * dlon * math.cos(lat0)
+            x = simulation.EARTH_RADIUS_M * dlon * math.cos(lat0_rad)
             y = simulation.EARTH_RADIUS_M * dlat
 
             xs.append(x / 1000.0)
@@ -320,51 +364,93 @@ class TrajectoryCanvas(FigureCanvas):
 
         return xs, ys
 
-    def _polar_coords(self, states: List[State]):
-        xs, ys = self._local_xy_km(states)
-        r = [math.hypot(x, y) for x, y in zip(xs, ys)]
-        theta = [math.atan2(x, y) for x, y in zip(xs, ys)]
-        return theta, r
-
-    # ---------- tracé principal ----------
-
-    def plot_trajectory(self, states: List[State]):
-        self.ax_alt.clear()
-        self.ax_dist.clear()
-        self.ax_map.clear()
-        self.ax_polar.clear()
-
-        if not states:
-            self.draw()
+    # =========================================================
+    # Tracé principal
+    # =========================================================
+    def _on_mouse_move(self, event):
+        if event.inaxes is None:
             return
 
-        # Séparation phases
-        ascent = [s for s in states if s.phase == "ASCENT"]
-        descent = [s for s in states if s.phase == "DESCENT"]
+        if not self.current_states or not hasattr(self, "_cursor_data"):
+            return
 
-        # ----- coordonnées locales cumulées (UNE SEULE FOIS) -----
-        lat0 = math.radians(states[0].lat_deg)
-        lat_ref = states[0].lat_deg
-        lon_ref = states[0].lon_deg
+        if event.xdata is None:
+            return
 
-        xs = []
-        ys = []
-        dist = []
-        theta = []
+        # temps cible (min → s)
+        t_target_s = event.xdata * 60.0
 
-        for s in states:
-            dlat = math.radians(s.lat_deg - lat_ref)
-            dlon = math.radians(s.lon_deg - lon_ref)
+        # index temporel le plus proche
+        times = self._cursor_data["t"]
+        idx = min(range(len(times)), key=lambda i: abs(times[i] - t_target_s))
 
-            x = simulation.EARTH_RADIUS_M * dlon * math.cos(lat0) / 1000.0
-            y = simulation.EARTH_RADIUS_M * dlat / 1000.0
+        # valeurs
+        t_min = times[idx] / 60.0
+        alt = self._cursor_data["alt"][idx]
+        lon = self._cursor_data["lon"][idx]
+        lat = self._cursor_data["lat"][idx]
+        dist = self._cursor_data["dist"][idx]
+        theta = self._cursor_data["theta"][idx]
 
-            xs.append(x)
-            ys.append(y)
-            dist.append(math.hypot(x, y))
-            theta.append(math.atan2(x, y))
+        # ----- ligne verticale (temps) -----
+        self.cursor_lines["time"].set_xdata([t_min, t_min])
 
-        # Index de burst = fin de montée
+        # ----- point distance -----
+        self.cursor_points["dist"].set_data(
+            [dist],
+            [alt],
+        )
+
+        # ----- point carte -----
+        self.cursor_points["map"].set_data(
+            [lon],
+            [lat],
+        )
+
+        # ----- point polaire -----
+        self.cursor_points["polar"].set_data(
+            [theta],
+            [dist],
+        )
+
+        # ----- message -----
+        if self.info_label:
+            self.info_label.setText(
+                f"T = {t_min:6.1f} min   |   "
+                f"ALT = {alt:7.0f} m   |   "
+                f"DIST = {dist:6.1f} km   |   "
+                f"LAT = {lat:.5f}   |   "
+                f"LON = {lon:.5f}   |   "
+                f"AZ = {math.degrees(theta)%360:5.1f}°"
+            )
+
+
+        self.draw_idle()
+
+
+
+    #-----------------------------------------------------------------------
+    def plot_trajectory(self, states: List[State]):
+
+        self.current_states = states
+
+        for ax in (self.ax_alt, self.ax_dist, self.ax_map, self.ax_polar):
+            ax.clear()
+            ax.set_facecolor("#2b2b2b")
+            ax.tick_params(colors="white")
+            for spine in ax.spines.values():
+                spine.set_color("white")
+
+        if not states:
+            self.draw_idle()
+            return
+
+        ascent, descent = self._split_phases(states)
+        xs, ys = self._compute_local_xy_km(states)
+
+        dist = [math.hypot(x, y) for x, y in zip(xs, ys)]
+        theta = [math.atan2(x, y) for x, y in zip(xs, ys)]
+
         n_ascent = len(ascent)
 
         # ---------- 1) Altitude vs temps ----------
@@ -378,13 +464,13 @@ class TrajectoryCanvas(FigureCanvas):
             alt = [s.alt_m for s in descent]
             self.ax_alt.plot(t, alt, color="orange", label="Descente")
 
-        self.ax_alt.set_title("Altitude en fonction du temps")
-        self.ax_alt.set_xlabel("Temps (min)")
-        self.ax_alt.set_ylabel("Altitude (m)")
-        self.ax_alt.grid(True)
+        self.ax_alt.set_title("Altitude vs Temps", color="white")
+        self.ax_alt.set_xlabel("Temps (min)", color="white")
+        self.ax_alt.set_ylabel("Altitude (m)", color="white")
+        self.ax_alt.grid(True, alpha=0.3)
         self.ax_alt.legend()
 
-        # ---------- 2) Altitude vs distance sol (CORRIGÉ) ----------
+        # ---------- 2) Altitude vs distance ----------
         if ascent:
             self.ax_dist.plot(
                 dist[:n_ascent],
@@ -401,10 +487,10 @@ class TrajectoryCanvas(FigureCanvas):
                 label="Descente",
             )
 
-        self.ax_dist.set_title("Altitude vs distance sol")
-        self.ax_dist.set_xlabel("Distance horizontale (km)")
-        self.ax_dist.set_ylabel("Altitude (m)")
-        self.ax_dist.grid(True)
+        self.ax_dist.set_title("Altitude vs Distance sol", color="white")
+        self.ax_dist.set_xlabel("Distance horizontale (km)", color="white")
+        self.ax_dist.set_ylabel("Altitude (m)", color="white")
+        self.ax_dist.grid(True, alpha=0.3)
         self.ax_dist.legend()
 
         # ---------- 3) Trajectoire au sol ----------
@@ -424,13 +510,13 @@ class TrajectoryCanvas(FigureCanvas):
                 label="Descente",
             )
 
-        self.ax_map.set_title("Trajectoire au sol")
-        self.ax_map.set_xlabel("Longitude (°)")
-        self.ax_map.set_ylabel("Latitude (°)")
-        self.ax_map.grid(True)
+        self.ax_map.set_title("Trajectoire au sol", color="white")
+        self.ax_map.set_xlabel("Longitude (°)", color="white")
+        self.ax_map.set_ylabel("Latitude (°)", color="white")
+        self.ax_map.grid(True, alpha=0.3)
         self.ax_map.legend()
 
-        # ---------- 4) Vue polaire (CORRIGÉ) ----------
+        # ---------- 4) Vue polaire ----------
         if ascent:
             self.ax_polar.plot(
                 theta[:n_ascent],
@@ -450,14 +536,45 @@ class TrajectoryCanvas(FigureCanvas):
         self.ax_polar.set_theta_zero_location("N")
         self.ax_polar.set_theta_direction(-1)
         self.ax_polar.set_thetagrids([0, 90, 180, 270], labels=["N", "E", "S", "W"])
-        self.ax_polar.set_title("Vue polaire (boussole)")
-        self.ax_polar.grid(True)
+        self.ax_polar.set_title("Vue polaire", color="white")
+        self.ax_polar.grid(True, alpha=0.3)
         self.ax_polar.legend(loc="upper right")
 
+        # ----- curseurs -----
+        self.cursor_lines["time"] = self.ax_alt.axvline(
+            x=0, color="white", linestyle="--", alpha=0.7
+        )
+
+        self.cursor_points["dist"] = self.ax_dist.plot(
+            [], [], "o", color="white"
+        )[0]
+
+        self.cursor_points["map"] = self.ax_map.plot(
+            [], [], "o", color="white"
+        )[0]
+
+        self.cursor_points["polar"] = self.ax_polar.plot(
+            [], [], "o", color="white"
+        )[0]
+
+        self._cursor_data = {
+            "t": [s.t_s for s in states],
+            "alt": [s.alt_m for s in states],
+            "lat": [s.lat_deg for s in states],
+            "lon": [s.lon_deg for s in states],
+            "xs": xs,
+            "ys": ys,
+            "dist": dist,
+            "theta": theta,
+        }
+
+        # ---------- zoom auto ----------
+        for ax in (self.ax_alt, self.ax_dist, self.ax_map):
+            ax.relim()
+            ax.autoscale(enable=True)
+
         self.figure.tight_layout()
-        self.draw()
-
-
+        self.draw_idle()
 
 class MonteCarloCanvas(FigureCanvas):
     def __init__(self, parent: Optional[QWidget] = None):
@@ -665,7 +782,19 @@ class GfsDownloadDialog(QDialog):
             self.cycle_combo.addItem(f"{c:02d}z", c)
 
         hour_utc = datetime.datetime.utcnow().hour
-        default_cycle = max([c for c in (0, 6, 12, 18) if c <= hour_utc] or [0])
+
+        # marge de sécurité NOMADS (~5h)
+        if hour_utc < 5:
+            default_cycle = 18  # veille
+        elif hour_utc < 11:
+            default_cycle = 0
+        elif hour_utc < 17:
+            default_cycle = 6
+        elif hour_utc < 23:
+            default_cycle = 12
+        else:
+            default_cycle = 18
+
         idx = (0, 6, 12, 18).index(default_cycle)
         self.cycle_combo.setCurrentIndex(idx)
         layout.addRow("Cycle :", self.cycle_combo)
@@ -674,18 +803,18 @@ class GfsDownloadDialog(QDialog):
         self.fhour_spin = QSpinBox()
         self.fhour_spin.setRange(0, 240)
         self.fhour_spin.setSingleStep(3)
-        self.fhour_spin.setValue(0)
+        self.fhour_spin.setValue(3)
         layout.addRow("Heure de prévision (fXXX) :", self.fhour_spin)
 
         # Domaine autour du point de lancement
         self.lat_span = QDoubleSpinBox()
         self.lat_span.setRange(1.0, 40.0)
-        self.lat_span.setValue(10.0)
+        self.lat_span.setValue(20.0)
         self.lat_span.setSingleStep(1.0)
 
         self.lon_span = QDoubleSpinBox()
         self.lon_span.setRange(1.0, 40.0)
-        self.lon_span.setValue(10.0)
+        self.lon_span.setValue(20.0)
         self.lon_span.setSingleStep(1.0)
 
         layout.addRow(f"Lat centre : {lat0:.3f}°", QLabel(""))
@@ -694,10 +823,11 @@ class GfsDownloadDialog(QDialog):
         layout.addRow("Demi-ouverture lon (°) :", self.lon_span)
 
         # Niveaux fixes typiques ballon
-        self.levels_edit = QLineEdit("1000 925 850 700 500 400 300 250 200")
+        self.levels_edit = QLineEdit("")
+        self.levels_edit.setPlaceholderText("Vide = tous les niveaux (recommandé)")
         layout.addRow("Niveaux (hPa) :", self.levels_edit)
 
-        self.vars_edit = QLineEdit("UGRD VGRD")
+        self.vars_edit = QLineEdit("UGRD VGRD TMP")
         layout.addRow("Variables :", self.vars_edit)
 
         buttons = QDialogButtonBox(
@@ -753,8 +883,8 @@ class MonteCarloDialog(QDialog):
         layout = QFormLayout(self)
 
         self.sb_runs = QSpinBox()
-        self.sb_runs.setRange(10, 2000)
-        self.sb_runs.setValue(200)
+        self.sb_runs.setRange(1, 200)
+        self.sb_runs.setValue(50)
         layout.addRow("Nombre de runs :", self.sb_runs)
 
         self.sb_sigma_desc = QDoubleSpinBox()
@@ -799,7 +929,7 @@ class MonteCarloDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Prévision de descente de ballon sonde - v{__version__}")
+        self.setWindowTitle(f"Prévision de ballon sonde - v{__version__}")
 
         self.current_states: List[State] = []
 
@@ -994,9 +1124,36 @@ class MainWindow(QMainWindow):
             header_item.setToolTip("Temps depuis le début de la descente.")
         self.tabs.addTab(self.table_results, "Résultats")
 
-        # Trajectoire 2D
-        self.canvas = TrajectoryCanvas()
-        self.tabs.addTab(self.canvas, "Trajectoire 2D")
+        # ---- Onglet Trajectoire 2D ----
+        from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
+
+        self.tab_traj2d = QWidget()
+        traj_layout = QVBoxLayout(self.tab_traj2d)
+
+        self.canvas = TrajectoryCanvas(self.tab_traj2d)
+        self.traj_toolbar = NavigationToolbar2QT(self.canvas, self)
+
+        self.lbl_traj_info = QLabel("Déplace la souris sur les graphes")
+        self.lbl_traj_info.setAlignment(Qt.AlignCenter)
+        self.lbl_traj_info.setStyleSheet("""
+            QLabel {
+                color: #e0e0e0;
+                background-color: #1e1e1e;
+                padding: 6px;
+                border-top: 1px solid #444;
+                font-family: Consolas, monospace;
+                font-size: 11px;
+            }
+        """)
+
+        traj_layout.addWidget(self.traj_toolbar)
+        traj_layout.addWidget(self.canvas)
+        traj_layout.addWidget(self.lbl_traj_info)
+
+        self.canvas.toolbar = self.traj_toolbar
+        self.tabs.addTab(self.tab_traj2d, "Trajectoire 2D")
+        self.canvas.info_label = self.lbl_traj_info
+
 
         # Trajectoire 3D + contrôles animation
         self.canvas3d = ThreeDCanvas()
@@ -1112,28 +1269,34 @@ class MainWindow(QMainWindow):
         # Icon Boutton
         self.setWindowIcon(app_icon("app"))
 
-        
         btn_simulate.setIcon(app_icon("simulate"))
 
-        
         btn_mc.setIcon(app_icon("monte_carlo"))
 
-        
-        btn_descent.setIcon(app_icon("csv_desc"))
+        btn_ascent.setIcon(app_icon("csv_ascent"))
 
+        btn_descent.setIcon(app_icon("csv_desc"))
         
         btn_wind.setIcon(app_icon("csv_wind"))
-
-        
+   
         btn_gfs.setIcon(app_icon("gfs_file"))
         
-        
         btn_gfs_dl.setIcon(app_icon("gfs_download"))
+
+        self.tabs.setTabIcon(0, app_icon("tab_result"))
+        self.tabs.setTabIcon(1, app_icon("tab_2d"))
+        self.tabs.setTabIcon(2, app_icon("tab_3d"))
+        self.tabs.setTabIcon(3, app_icon("tab_map"))
+        self.tabs.setTabIcon(4, app_icon("csv_desc"))
+        self.tabs.setTabIcon(5, app_icon("csv_ascent"))
+        self.tabs.setTabIcon(6, app_icon("csv_wind"))
+        self.tabs.setTabIcon(7, app_icon("monte_carlo"))
 
         self.btn_anim_play.setIcon(app_icon("play"))
         self.btn_anim_stop.setIcon(app_icon("pause"))
         self.btn_anim_reset.setIcon(app_icon("reset_view"))
-
+        
+    #-------------------------------------------------------
     def on_map_style_changed(self, style_name: str):
         tile = MAP_STYLES.get(style_name, "CartoDB dark_matter")
         self.map_widget.set_map_style(tile)
@@ -1219,6 +1382,14 @@ class MainWindow(QMainWindow):
         except ValueError as e:
             QMessageBox.warning(self, "Profil descente invalide", str(e))
             return
+        
+        # Profil ascension effectif
+        try:
+            ascent_profile = self._build_effective_ascent_profile()
+        except ValueError as e:
+            QMessageBox.warning(self, "Profil montée invalide", str(e))
+            return
+
 
         dlg = MonteCarloDialog(self)
         if dlg.exec_() != QDialog.Accepted:
@@ -1233,6 +1404,7 @@ class MainWindow(QMainWindow):
                 lat0_deg=lat0,
                 lon0_deg=lon0,
                 dt_s=dt,
+                base_ascent=ascent_profile,
                 base_descent=descent_profile,
                 base_wind=wind_profile,
                 sigma_desc_rel=params["sigma_desc_rel"],
@@ -1278,9 +1450,9 @@ class MainWindow(QMainWindow):
         text = f"""
         <h3>Sonde Predict</h3>
         <p>Version : <b>{__version__}</b></p>
-        <p>Simulation de descente de ballon / objet :</p>
+        <p>Simulation de ballon sonde / objet :</p>
         <ul>
-          <li>Profils de descente et de vent (CSV / GFS)</li>
+          <li>Profils de descente, montée et vent (CSV / GFS)</li>
           <li>Trajectoire 2D + 3D animée</li>
           <li>Monte Carlo & ellipse d'impact</li>
         </ul>
@@ -1320,8 +1492,8 @@ class MainWindow(QMainWindow):
     # ---------- Actions UI ----------
     def on_download_gfs_from_nomads(self):
         """
-        Télécharge un GRIB2 GFS 0.25° depuis NOMADS et remplit le profil vent
-        pour la lat/lon initiale actuelle.
+        Télécharge un ou plusieurs GRIB2 GFS 0.25° depuis NOMADS
+        et remplit le profil vent pour la lat/lon initiale.
         """
         lat0 = self.sb_lat0.value()
         lon0 = self.sb_lon0.value()
@@ -1342,46 +1514,65 @@ class MainWindow(QMainWindow):
         lon_min = lon0 - cfg["lon_span"]
         lon_max = lon0 + cfg["lon_span"]
 
-        url = gfs_download.build_gfs_url(
-            date_yyyymmdd=cfg["date"],
-            cycle_hour=cfg["cycle"],
-            fhour=cfg["fhour"],
-            lat_min=lat_min,
-            lat_max=lat_max,
-            lon_min=lon_min,
-            lon_max=lon_max,
-            vars_=cfg["vars"],
-            levels_hpa=cfg["levels"],
-            all_levels=(len(cfg["levels"]) == 0),
-        )
-
         # Dossier de sortie
         os.makedirs("gfs_data", exist_ok=True)
-        out_name = f"gfs_{cfg['date']}_{cfg['cycle']:02d}_f{cfg['fhour']:03d}.grib2"
-        out_path = os.path.join("gfs_data", out_name)
 
-        try:
-            gfs_download.download_gfs(url, out_path)
-        except requests.HTTPError as e:
-            QMessageBox.critical(self, "Erreur HTTP GFS", f"Erreur HTTP lors du téléchargement :\n{e}")
-            return
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur GFS", f"Erreur lors du téléchargement GFS :\n{e}")
+        # 👉 liste des fhour à tenter (0,3,6,… jusqu’à fhour max)
+        max_fhour = cfg["fhour"]
+        fhours = list(range(0, max_fhour + 1, 3))
+
+        downloaded_path = None
+
+        for fh in fhours:
+            url = gfs_download.build_gfs_url(
+                date_yyyymmdd=cfg["date"],
+                cycle_hour=cfg["cycle"],
+                fhour=fh,
+                lat_min=lat_min,
+                lat_max=lat_max,
+                lon_min=lon_min,
+                lon_max=lon_max,
+                vars_=cfg["vars"],
+                levels_hpa=cfg["levels"],
+                all_levels=(len(cfg["levels"]) == 0),
+            )
+
+            out_name = f"gfs_{cfg['date']}_{cfg['cycle']:02d}_f{fh:03d}.grib2"
+            out_path = os.path.join("gfs_data", out_name)
+
+            ok = gfs_download.download_gfs(url, out_path)
+            if ok:
+                downloaded_path = out_path
+                print(f"[GFS] ✔ Utilisation de {out_name}")
+                break
+
+        if downloaded_path is None:
+            QMessageBox.critical(
+                self,
+                "GFS indisponible",
+                "Aucun fichier GFS n'est disponible pour ce run.\n"
+                "Essaye un cycle plus ancien (ex: 12z ou 6z).",
+            )
             return
 
-        # Extraction du profil vent pour la lat/lon initiale
+        # Extraction du profil vent
         try:
             points = gfs_utils.extract_wind_profile_from_gfs_grib(
-                grib_path=out_path,
+                grib_path=downloaded_path,
                 lat_deg=lat0,
                 lon_deg=lon0,
             )
         except Exception as e:
-            QMessageBox.critical(self, "Erreur lecture GRIB", f"Impossible d'extraire le vent GFS :\n{e}")
+            QMessageBox.critical(
+                self,
+                "Erreur lecture GRIB",
+                f"Impossible d'extraire le vent GFS :\n{e}",
+            )
             return
 
         self._fill_wind_table_from_points(points)
-        self.lbl_wind_file.setText(f"Profil de vent : GFS NOMADS {out_name}")
+        self.lbl_wind_file.setText(f"Profil de vent : GFS NOMADS {os.path.basename(downloaded_path)}")
+
 
 
     def on_load_ascent_csv(self):
@@ -1682,79 +1873,93 @@ class MainWindow(QMainWindow):
         if not points:
             raise ValueError("Aucun point valide dans le profil de vent.")
         return WindProfile(points)
+      
     
-    def _scale_descent_profile_for_mass(self, base_profile: DescentProfile) -> DescentProfile:
+    def _build_effective_descent_profile(self, alt0_m: float) -> DescentProfile:
         """
-        Adapte le profil de descente en fonction de la masse de la sonde.
-        Approx : v_new = v_base * sqrt(m / m_ref), avec m_ref = 1 kg.
+        Profil de descente effectif avec :
+        - effet de masse progressif (réaliste)
+        - compatible Predictor
         """
+        base_profile = self._get_descent_profile_from_table()
+
         m = self.sb_mass.value()
         if m <= 0:
             return base_profile
 
-        m_ref = 1.0  # masse de référence implicite du profil de base
-        factor = math.sqrt(m / m_ref)
+        m_ref = 1.0
+        mass_factor = math.sqrt(m / m_ref)
 
-        scaled_points: List[DescentPoint] = []
+        points: List[DescentPoint] = []
+
         for p in base_profile.points:
+            alt = p.alt_m
+
+            # 🔥 effet masse progressif (clé)
+            if alt > 20000:
+                alpha = 0.15      # presque pas d'effet en très haute altitude
+            elif alt < 3000:
+                alpha = 1.0      # plein effet proche du sol
+            else:
+                alpha = 1.0 - (20000 - alt) / (20000 - 3000)
+
+            factor = 1.0 + alpha * (mass_factor - 1.0)
+            factor = max(0.85, min(factor, 1.5))
+
             v = p.descent_ms * factor
-            v = max(0.1, v)  # sécurité
-            scaled_points.append(
+            v = max(v, 0.5)  # sécurité
+
+            points.append(
                 DescentPoint(
-                    alt_m=p.alt_m,
+                    alt_m=alt,
                     descent_ms=v,
                 )
             )
 
-        return DescentProfile(scaled_points)
-    
-    
-    def _build_effective_descent_profile(self, alt0_m: float) -> DescentProfile:
-        """
-        Construit le profil de descente effectif :
-          - profil table + facteur masse,
-          - si 'chute libre' cochée : en-dessous de ff_alt, on accélère la descente.
-        """
-        # 1) profil base depuis la table
-        base_profile = self._get_descent_profile_from_table()
-        return self._scale_descent_profile_for_mass(base_profile)
+        return DescentProfile(points)
+
 
 
     def _build_effective_ascent_profile(self) -> AscentProfile:
         """
-        Construit le profil d'ascension effectif :
-        - profil table ascension
-        - éventuel facteur lié à la masse (option simple et réaliste)
+        Profil d'ascension avec effet de masse progressif (réaliste).
         """
-        # 1) profil base depuis la table
         base_profile = self._get_ascent_profile_from_table()
 
         m = self.sb_mass.value()
         if m <= 0:
             return base_profile
 
-        # Masse de référence implicite du profil (1 kg)
         m_ref = 1.0
-
-        # En montée ballon : plus lourd = montée plus lente
-        # modèle simple : v ~ 1 / sqrt(m)
-        factor = math.sqrt(m_ref / m)
+        mass_factor = math.sqrt(m_ref / m)
 
         points: List[AscentPoint] = []
-        for p in base_profile.points:
-            v = p.ascent_ms * factor
 
-            # sécurité : éviter montée nulle ou négative
-            v = max(v, 0.2)
+        for p in base_profile.points:
+            alt = p.alt_m
+
+            # 🔥 effet masse progressif
+            if alt > 20000:
+                alpha = 0.2    # quasi nul en haute altitude
+            elif alt < 5000:
+                alpha = 1.0
+            else:
+                alpha = 1.0 - (alt - 5000) / (20000 - 5000)
+
+            factor = 1.0 + alpha * (mass_factor - 1.0)
+
+            v = p.ascent_ms * factor
+            v = max(v, 0.3)
 
             points.append(
                 AscentPoint(
-                    alt_m=p.alt_m,
+                    alt_m=alt,
                     ascent_ms=v,
                 )
             )
 
         return AscentProfile(points)
+
 
     # ---------- Lecture CSV ----------
 

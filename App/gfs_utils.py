@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import os
 from typing import List
 
 import xarray as xr
@@ -33,6 +34,10 @@ def extract_wind_profile_from_gfs_grib(
 
     On interpole sur le point de grille le plus proche de (lat_deg, lon_deg).
     """
+    idx_path = grib_path + ".idx"
+    if os.path.exists(idx_path):
+        os.remove(idx_path)
+
 
     # On ouvre le jeu de données avec cfgrib via xarray
     ds = xr.open_dataset(
@@ -82,6 +87,9 @@ def extract_wind_profile_from_gfs_grib(
     # On fabrique une liste de WindPoint avec altitude approx
     points: List[WindPoint] = []
     for p_hpa, u, v in zip(levels_hpa, u_vals, v_vals):
+        if math.isnan(u) or math.isnan(v):
+            continue
+
         alt_m = pressure_hpa_to_alt_m(float(p_hpa))
         points.append(
             WindPoint(
