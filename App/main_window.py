@@ -1,6 +1,5 @@
 # main_window.py
 from __future__ import annotations
-
 import os
 import csv
 import math
@@ -9,10 +8,11 @@ from App.simulation import simulate_descent, simulate_flight, State
 from App.profiles import AscentProfile, AscentPoint
 from App import gfs_utils
 import requests
+from PyQt5.QtWidgets import QApplication
 from App import gfs_download
 import datetime
 from App.map_widget import MAP_STYLES
-
+from App.themes import THEMES
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QSlider
 
@@ -63,6 +63,8 @@ from App.map_widget import MapWidget
 from App.version import __version__
 
 import matplotlib as mpl
+
+
 
 
 def app_icon(name: str) -> QIcon:
@@ -937,6 +939,14 @@ class MainWindow(QMainWindow):
         self._init_default_profiles()
 
     # ---------- UI ----------
+    def on_theme_changed(self, name: str):
+        app = QApplication.instance()
+        if not app:
+            return
+        theme_func = THEMES.get(name)
+        if theme_func:
+            theme_func(app)
+
 
     def _build_ui(self):
         central = QWidget()
@@ -946,42 +956,19 @@ class MainWindow(QMainWindow):
         # ---- Panneau gauche : profils + paramètres + simulation ----
         control_layout = QVBoxLayout()
 
-        gb_files = QGroupBox("Profils")
-        files_layout = QVBoxLayout()
+        # --- Sélecteur de thème ---
+        theme_layout = QHBoxLayout()
+        theme_layout.addWidget(QLabel("Thème :"))
 
-        self.lbl_ascent_file = QLabel("Profile de Monter")
-        btn_ascent = QPushButton("Charger CSV ascension…")
-        btn_ascent.clicked.connect(self.on_load_ascent_csv)
+        self.cb_theme = QComboBox()
+        self.cb_theme.addItems(THEMES.keys())
+        self.cb_theme.setCurrentText("Dark Blue Tech")
 
-        self.lbl_descent_file = QLabel("Profil de descente : (manuel / CSV)")
-        btn_descent = QPushButton("Charger CSV descente…")
-        btn_descent.setToolTip("Charge un CSV alt_m;descent_ms et remplit l'onglet 'Profil descente'.")
-        btn_descent.clicked.connect(self.on_load_descent_csv)
+        theme_layout.addWidget(self.cb_theme)
+        theme_layout.addStretch()
 
-        self.lbl_wind_file = QLabel("Profil de vent : (manuel / CSV / GFS)")
-        btn_wind = QPushButton("Charger CSV vent…")
-        btn_wind.setToolTip("Charge un CSV alt_m;wind_u_ms;wind_v_ms et remplit l'onglet 'Profil vent'.")
-        btn_wind.clicked.connect(self.on_load_wind_csv)
-
-        btn_gfs = QPushButton("Charger GFS (GRIB2)…")
-        btn_gfs.setToolTip("Charge un fichier GFS GRIB2 et génère le profil vent pour la lat/lon courante.")
-        btn_gfs.clicked.connect(self.on_load_gfs_wind)
-
-        
-        btn_gfs_dl = QPushButton("Télécharger GFS (NOMADS)…")
-        btn_gfs_dl.setToolTip("Télécharge un sous-ensemble GFS 0.25° depuis NOMADS puis remplit le profil vent.")
-        btn_gfs_dl.clicked.connect(self.on_download_gfs_from_nomads)
-
-        files_layout.addWidget(self.lbl_descent_file)
-        files_layout.addWidget(btn_ascent)
-        files_layout.addWidget(btn_descent)
-        files_layout.addSpacing(10)
-        files_layout.addWidget(self.lbl_wind_file)
-        files_layout.addWidget(btn_wind)
-        files_layout.addWidget(btn_gfs)
-        files_layout.addWidget(btn_gfs_dl)
-
-        gb_files.setLayout(files_layout)
+        control_layout.insertLayout(0, theme_layout)
+        self.cb_theme.currentTextChanged.connect(self.on_theme_changed)
 
 
         gb_params = QGroupBox("Paramètres initiaux")
@@ -1094,7 +1081,7 @@ class MainWindow(QMainWindow):
         btn_mc.setToolTip("Lance N simulations avec bruit sur vent/descente et affiche la zone probable d'impact.")
         btn_mc.clicked.connect(self.on_monte_carlo)
 
-        control_layout.addWidget(gb_files)
+    
         control_layout.addWidget(gb_params)
         control_layout.addWidget(btn_simulate)
         control_layout.addWidget(btn_mc) 
@@ -1113,7 +1100,7 @@ class MainWindow(QMainWindow):
                 "Alt (m)",
                 "Lat (°)",
                 "Lon (°)",
-                "V verticale (m/s)",
+                "Vitesse (m/s)",
                 "u (m/s)",
                 "v (m/s)",
             ]
@@ -1225,29 +1212,6 @@ class MainWindow(QMainWindow):
 
         self.cb_map_style.currentTextChanged.connect(self.on_map_style_changed)
 
-        # Profil descente (éditable directement)
-        self.table_profile_desc = QTableWidget()
-        self.table_profile_desc.setColumnCount(2)
-        self.table_profile_desc.setHorizontalHeaderLabels(["Alt (m)", "Vdesc (m/s)"])
-        self.table_profile_desc.setToolTip(
-            "Profil de descente en fonction de l'altitude. Tu peux éditer les valeurs ici."
-        )
-        self.tabs.addTab(self.table_profile_desc, "Profil descente")
-
-        # Profil ascension
-        self.table_profile_ascent = QTableWidget()
-        self.table_profile_ascent.setColumnCount(2)
-        self.table_profile_ascent.setHorizontalHeaderLabels(["Alt (m)", "Vasc (m/s)"])
-        self.tabs.addTab(self.table_profile_ascent, "Profil ascension")
-
-        # Profil vent (éditable directement)
-        self.table_profile_wind = QTableWidget()
-        self.table_profile_wind.setColumnCount(3)
-        self.table_profile_wind.setHorizontalHeaderLabels(["Alt (m)", "u (m/s)", "v (m/s)"])
-        self.table_profile_wind.setToolTip(
-            "Profil de vent (u/v) en fonction de l'altitude. Tu peux éditer les valeurs ici."
-        )
-        self.tabs.addTab(self.table_profile_wind, "Profil vent")
         
         # Onglet Monte Carlo avec toolbar de zoom/pan
         self.mc_canvas = MonteCarloCanvas()
@@ -1264,6 +1228,68 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self.resize(1300, 750)
+
+        # Onglet Profils (montée, descente, vent)
+        self.tab_profiles = QWidget()
+        self.tabs.addTab(self.tab_profiles, "Profils")
+        self.layout_profiles = QVBoxLayout(self.tab_profiles)
+
+        # ============================================================
+        # Onglet : Profils
+        # ============================================================
+        profiles_layout = QVBoxLayout()
+        self.layout_profiles.addLayout(profiles_layout)
+
+        # --- Profils Montée ---
+        group_ascent = QGroupBox("Profil de montée")
+        layout_ascent = QVBoxLayout(group_ascent)
+        self.table_profile_ascent = QTableWidget(10, 2)
+        self.table_profile_ascent.setHorizontalHeaderLabels(["Altitude (m)", "Vitesse (m/s)"])
+        layout_ascent.addWidget(self.table_profile_ascent)
+        btn_load_ascent = QPushButton("Charger CSV montée")
+        layout_ascent.addWidget(btn_load_ascent)
+        btn_load_ascent.clicked.connect(self.on_load_ascent_csv)
+        self.lbl_ascent_file = QLabel("Aucun fichier chargé")
+        self.lbl_ascent_file.setStyleSheet("color: #aaa; font-size: 11px;")
+        layout_ascent.addWidget(self.lbl_ascent_file)
+        profiles_layout.addWidget(group_ascent)
+        
+
+        # --- Profils Descente ---
+        group_desc = QGroupBox("Profil de descente")
+        layout_desc = QVBoxLayout(group_desc)
+        self.table_profile_desc = QTableWidget(10, 2)
+        self.table_profile_desc.setHorizontalHeaderLabels(["Altitude (m)", "Vitesse (m/s)"])
+        layout_desc.addWidget(self.table_profile_desc)
+        btn_load_desc = QPushButton("Charger CSV descente")
+        layout_desc.addWidget(btn_load_desc)
+        btn_load_desc.clicked.connect(self.on_load_descent_csv)
+        self.lbl_descent_file = QLabel("Aucun fichier chargé")
+        self.lbl_descent_file.setStyleSheet("color: #aaa; font-size: 11px;")
+        layout_desc.addWidget(self.lbl_descent_file)
+        profiles_layout.addWidget(group_desc)
+
+        # --- Profils Vent ---
+        group_wind = QGroupBox("Profil de vent")
+        layout_wind = QVBoxLayout(group_wind)
+        self.table_profile_wind = QTableWidget(10, 3)
+        self.table_profile_wind.setHorizontalHeaderLabels(["Altitude (m)", "Vent U (m/s)", "Vent V (m/s)"])
+        layout_wind.addWidget(self.table_profile_wind)
+        btn_load_wind = QPushButton("Charger CSV vent")
+        layout_wind.addWidget(btn_load_wind)
+        btn_load_wind.clicked.connect(self.on_load_wind_csv)
+        self.lbl_wind_file = QLabel("Aucun fichier chargé")
+        self.lbl_wind_file.setStyleSheet("color: #aaa; font-size: 11px;")
+        layout_wind.addWidget(self.lbl_wind_file)
+        profiles_layout.addWidget(group_wind)
+
+        # --- Profils GFS ---
+        group_gfs = QGroupBox("Chargement GFS NOMADS")
+        layout_gfs = QVBoxLayout(group_gfs)
+        self.btn_gfs_dl = QPushButton("Télécharger GFS depuis NOMADS")
+        layout_gfs.addWidget(self.btn_gfs_dl)
+        self.btn_gfs_dl.clicked.connect(self.on_download_gfs_from_nomads)
+        profiles_layout.addWidget(group_gfs)
         
         # Icon Boutton
         self.setWindowIcon(app_icon("app"))
@@ -1272,24 +1298,18 @@ class MainWindow(QMainWindow):
 
         btn_mc.setIcon(app_icon("monte_carlo"))
 
-        btn_ascent.setIcon(app_icon("csv_ascent"))
+        btn_load_ascent.setIcon(app_icon("csv_ascent"))
 
-        btn_descent.setIcon(app_icon("csv_desc"))
+        btn_load_desc.setIcon(app_icon("csv_desc"))
         
-        btn_wind.setIcon(app_icon("csv_wind"))
-   
-        btn_gfs.setIcon(app_icon("gfs_file"))
-        
-        btn_gfs_dl.setIcon(app_icon("gfs_download"))
+        btn_load_wind.setIcon(app_icon("csv_wind"))
 
         self.tabs.setTabIcon(0, app_icon("tab_result"))
         self.tabs.setTabIcon(1, app_icon("tab_2d"))
         self.tabs.setTabIcon(2, app_icon("tab_3d"))
         self.tabs.setTabIcon(3, app_icon("tab_map"))
-        self.tabs.setTabIcon(4, app_icon("csv_desc"))
-        self.tabs.setTabIcon(5, app_icon("csv_ascent"))
-        self.tabs.setTabIcon(6, app_icon("csv_wind"))
-        self.tabs.setTabIcon(7, app_icon("monte_carlo"))
+        self.tabs.setTabIcon(4, app_icon("monte_carlo"))
+        self.tabs.setTabIcon(5, app_icon("tab_result"))
 
         self.btn_anim_play.setIcon(app_icon("play"))
         self.btn_anim_stop.setIcon(app_icon("pause"))
@@ -1591,7 +1611,7 @@ class MainWindow(QMainWindow):
             return
 
         self._fill_ascent_table_from_points(points)
-        self.lbl_ascent_file.setText(f"Profil de montée : {path}")
+        self.lbl_ascent_file.setText(f"Charger CSV montée {path}")
 
 
     def on_load_descent_csv(self):
